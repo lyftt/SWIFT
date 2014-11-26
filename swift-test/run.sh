@@ -24,7 +24,8 @@ size2=$(stat -c %s $fname.swift.bc)
 llc $fname.swift.bc -o $fname.swift.s
 g++ -o $fname.swift.exe $fname.swift.s
 t3=$(date +%s%N)
-ret=$(./$fname.swift.exe)
+./$fname.swift.exe
+ret=$?
 t4=$(date +%s%N)
 
 opt -dot-cfg $fname.swift.bc
