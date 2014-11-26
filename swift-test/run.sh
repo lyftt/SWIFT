@@ -10,7 +10,7 @@ size1=$(stat -c %s $fname.bc)
 llc $fname.bc -o $fname.s
 g++ -o $fname.exe $fname.s
 t1=$(date +%s%N)
-./$fname.exe
+./$fname.exe < $iname
 t2=$(date +%s%N)
 
 opt -gvn < $fname.bc > $fname.opt.bc || { echo "Failed to opt-load"; exit 1; }
