@@ -1,6 +1,7 @@
 #!/bin/bash
-fname=test
-proj_dir=~/swift
+fname=compress
+iname=compress.in.Z
+build_dir=~/swift/Release+Asserts/lib
 
 rm *.bc *.s *.dot *.exe
 
@@ -12,11 +13,11 @@ opt -dot-cfg $fname.opt.bc
 mv cfg.main.dot non-swift-cfg.dot
 dot -Tpdf non-swift-cfg.dot -o $fname-non-swift-cfg.pdf
 
-opt -load $proj_dir/Release+Asserts/lib/swift.so -swift < $fname.opt.bc > $fname.swift.bc || { echo "Failed to opt-load"; exit 1; }
+opt -load $build_dir/swift.so -swift < $fname.opt.bc > $fname.swift.bc || { echo "Failed to opt-load"; exit 1; }
 
 llc $fname.swift.bc -o $fname.swift.s
 g++ -o $fname.swift.exe $fname.swift.s
-./$fname.swift.exe
+./$fname.swift.exe < $iname
 
 opt -dot-cfg $fname.swift.bc
 mv cfg.main.dot swift-cfg.dot
