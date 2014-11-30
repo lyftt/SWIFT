@@ -24,6 +24,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 /* Header file global to this project */
 #include <map>
@@ -45,7 +46,6 @@ namespace {
 		}
 		
 		std::map<User *, AllocaInst *> shadowMap;
-		std::set<User *> regSet;
 
 		virtual bool runOnFunction(Function &F) {
 			
@@ -119,16 +119,60 @@ namespace {
 				}
 			}
 			
-			//TODO add check before each critical inst (store, br, call, etc.)
+			// add check before each critical inst (store, br, call, etc.)
+			BasicBlock *FaultDetected = BasicBlock::Create(F.getContext(), "fault", &F);
+			ReturnInst *FaultExit = ReturnInst::Create(F.getContext(), ConstantInt::get(F.getReturnType(), 1), FaultDetected);
+			
 			for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
 				for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ) {
 					Instruction &I = *II++;
 					if (dyn_cast<StoreInst>(&I)
-							|| dyn_cast<BranchInst>(&I)
 							|| dyn_cast<CallInst>(&I)
 					) {
-						//TODO
-							
+												
+						// for store/call inst, check operands
+						for (User::op_iterator oi = I.op_begin(); oi!= I.op_end(); ++oi) {
+							if (User *operand = dyn_cast<User>(oi)) {
+								if (!dyn_cast<AllocaInst>(operand) && shadowMap.find(operand) != shadowMap.end()) {
+									LoadInst *shadow = new LoadInst(shadowMap[operand], "ldShadow");
+									shadow->insertBefore(&I);
+									ICmpInst *icmp = new ICmpInst(ICmpInst::ICMP_NE, operand, shadow);
+									icmp->insertBefore(&I);
+									
+									BasicBlock *RestBB = SplitBlock(BB, &I, this);
+									BranchInst::Create(FaultDetected, RestBB, icmp, BB->getTerminator());
+									BB->getInstList().pop_back();
+									
+									BB = RestBB;
+									II = BB->begin();
+									II++;
+									IE = BB->end();
+								}
+							}
+						}
+					} else if (BranchInst *BR = dyn_cast<BranchInst>(&I)) {
+						
+						// for branch inst, check dest
+						if (BR->isConditional()) {
+							Value *value = BR->getCondition();
+							if (User *cond = dyn_cast<User>(value)) {
+								if (shadowMap.find(cond) != shadowMap.end()) {
+									LoadInst *shadow = new LoadInst(shadowMap[cond], "ldShadow");
+									shadow->insertBefore(&I);
+									ICmpInst *icmp = new ICmpInst(ICmpInst::ICMP_NE, cond, shadow);
+									icmp->insertBefore(&I);
+									
+									BasicBlock *RestBB = SplitBlock(BB, &I, this);
+									BranchInst::Create(FaultDetected, RestBB, icmp, BB->getTerminator());
+									BB->getInstList().pop_back();
+									
+									BB = RestBB;
+									II = BB->begin();
+									II++;
+									IE = BB->end();
+								}
+							}
+						}
 					}
 				}
 			}
