@@ -92,14 +92,8 @@ namespace {
 						for (User::op_iterator oi = I.op_begin(); oi != I.op_end(); ++oi) {
 							if (User *operand = dyn_cast<User>(oi)) {
 								if (shadowMap.find(operand) != shadowMap.end()) {
-									
-									if (dyn_cast<LoadInst>(&I) && dyn_cast<AllocaInst>(operand)
-											|| dyn_cast<GetElementPtrInst>(&I) && opidx == 0
-											|| dyn_cast<StoreInst>(&I) && opidx == 1
-									) {
-										// load inst's operand is ptr, so use allocated shadow var directly
-										// GEP inst's first operand is ptr, so use allocated shadow var directly
-										// store inst's second operand is ptr, so use allocated shadow var directly
+									if (dyn_cast<AllocaInst>(operand)) {
+										// if this operand is a ptr itself, use the allocated ptr directly
 										cloned->setOperand(opidx, shadowMap[operand]);
 
 									} else {
