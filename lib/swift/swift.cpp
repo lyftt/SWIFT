@@ -44,40 +44,104 @@ namespace {
 			
 		}
 		
-		std::map<Value *, Value *> shadowMap;
+		std::map<User *, AllocaInst *> shadowMap;
+		std::set<User *> regSet;
 
 		virtual bool runOnFunction(Function &F) {
-	
-			for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
-				// iterate through each BasicBlock BB
-				
-				for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ) {
-					// iterate through each Instruction i
-					Instruction &I = *II++;
-					
-					if (AllocaInst *AI = dyn_cast<AllocaInst>(&I)) {
-						//TODO alloca inst
-						errs() << "alloca inst: " << *AI << "\n";
-					
-					} else if (StoreInst *ST = dyn_cast<StoreInst>(&I)) {
-						//TODO store inst
-						errs() << "store inst: " << *ST << "\n";
+			
+			// build shadow map for every register
+			BasicBlock *EntryBB = &(F.getEntryBlock());
 
-					} else if (BranchInst *BR = dyn_cast<BranchInst>(&I)) {
-						//TODO branch inst
-						errs() << "branch inst: " << *BR << "\n";
+			for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
+				for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ) {
+					Instruction &I = *II++;
+					if (!dyn_cast<StoreInst>(&I)
+							&& !dyn_cast<BranchInst>(&I)
+							&& !dyn_cast<CallInst>(&I)
+							&& !dyn_cast<TerminatorInst>(&I)
+					) {
+						User *U = (User *) &I;
 						
-					} else if (TerminatorInst *TI = dyn_cast<TerminatorInst>(&I)) {
-						//TODO terminator inst
-						errs() << "terminator: " << *TI << "\n";
+						// if current BB is entryBB, insert shadow before I, otherwise insert before entryBB's terminator
+						Instruction * successorInst = (BB == *EntryBB) ? &I : EntryBB->getTerminator();
+
+						// if current inst is allocca inst, simply clone it for shadow, otherwise alloca new mem for shadow
+						shadowMap[U] = (dyn_cast<AllocaInst>(&I)) ? dyn_cast<AllocaInst>(I.clone()) : new AllocaInst(U->getType(), "shadow");
 						
-					} else {
-						// regular inst
-						errs() << "regular inst: " << I << "\n";
-						Instruction *cloned = I.clone();
-						cloned->insertAfter(&I);
+						shadowMap[U]->insertBefore(successorInst);
 					}
 				}
+			}
+			
+			// insert duplication for each instruction
+			for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
+				for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ) {
+					Instruction &I = *II++;
+					
+					if (!dyn_cast<AllocaInst>(&I)
+							&& !dyn_cast<BranchInst>(&I)
+							&& !dyn_cast<CallInst>(&I)
+							&& !dyn_cast<TerminatorInst>(&I)
+					) {
+						
+						Instruction *cloned = I.clone();
+						cloned->insertAfter(&I);
+						
+						// use shadow variables as operands
+						int opidx = 0;
+						for (User::op_iterator oi = I.op_begin(); oi != I.op_end(); ++oi) {
+							if (User *operand = dyn_cast<User>(oi)) {
+								if (shadowMap.find(operand) != shadowMap.end()) {
+									
+									if (dyn_cast<LoadInst>(&I) && dyn_cast<AllocaInst>(operand)
+											|| dyn_cast<GetElementPtrInst>(&I) && opidx == 0
+											|| dyn_cast<StoreInst>(&I) && opidx == 1
+									) {
+										// load inst's operand is ptr, so use allocated shadow var directly
+										// GEP inst's first operand is ptr, so use allocated shadow var directly
+										// store inst's second operand is ptr, so use allocated shadow var directly
+										cloned->setOperand(opidx, shadowMap[operand]);
+
+									} else {
+										// for the rest operands which are not ptr, first load shadow var from mem to reg
+										LoadInst *LdShadow = new LoadInst(shadowMap[operand], "ldShadow");
+										LdShadow->insertBefore(cloned);
+										cloned->setOperand(opidx, LdShadow);
+									}
+								}								
+							}
+							opidx++;
+						}
+						
+						// store cloned instruction to correct shadow
+						if (User *dest = dyn_cast<User>(&I)) {
+							if (shadowMap.find(dest) != shadowMap.end()) {
+								StoreInst * StShadow = new StoreInst(cloned, shadowMap[dest]);
+								StShadow->insertAfter(cloned);
+							}
+						}
+						
+					}
+				}
+			}
+			
+			//TODO add check before each critical inst (store, br, call, etc.)
+			for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
+				for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ) {
+					Instruction &I = *II++;
+					if (dyn_cast<StoreInst>(&I)
+							|| dyn_cast<BranchInst>(&I)
+							|| dyn_cast<CallInst>(&I)
+					) {
+						//TODO
+							
+					}
+				}
+			}
+			
+			//TODO add GSR (General Signature Register) and RTS (Run-Time Signature)	
+			for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
+				
 			}
 			
 			return true;	
