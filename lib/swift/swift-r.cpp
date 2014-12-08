@@ -158,6 +158,8 @@ namespace {
 
 				std::map<User *, AllocaInst *> shadowMapA;
 				std::map<User *, AllocaInst *> shadowMapB;
+				std::map<LoadInst *, Instruction *> loadInstMapA;
+				std::map<LoadInst *, Instruction *> loadInstMapB;
 				
 				// build shadow map for every register
 				bool isEntryBB = true;
@@ -231,8 +233,13 @@ namespace {
 							// store cloned instruction to correct shadow
 							User *dest = dyn_cast<User>(&I);
 							if (shadowMapA.find(dest) != shadowMapA.end()) {
-									storeClonedIntoShadow(clonedA, dest, shadowMapA);
-									storeClonedIntoShadow(clonedB, dest, shadowMapB);
+								storeClonedIntoShadow(clonedA, dest, shadowMapA);
+								storeClonedIntoShadow(clonedB, dest, shadowMapB);
+							}
+							
+							if (LoadInst * LD = dyn_cast<LoadInst>(&I)) {
+								loadInstMapA[LD] = clonedA;
+								loadInstMapB[LD] = clonedB;
 							}
 						}
 					}
@@ -244,15 +251,25 @@ namespace {
 				for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
 					for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ) {
 						Instruction &I = *II++;
-						if (dyn_cast<StoreInst>(&I)
+						if (LoadInst * LD = dyn_cast<LoadInst>(&I)) {
+							User *operand = dyn_cast<User>(LD->getPointerOperand());
+							if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
+								CallInst * callMajority = callMajorityBeforeCriticalInst(LD, operand,
+									M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
+								callMajority->insertBefore(LD);
+								int opidx = LD->getPointerOperandIndex();
+								LD->setOperand(opidx, callMajority);
+								loadInstMapA[LD]->setOperand(opidx, callMajority);
+								loadInstMapB[LD]->setOperand(opidx, callMajority);
+							}
+						} else if (dyn_cast<StoreInst>(&I)
 								|| dyn_cast<CallInst>(&I)
-								//|| dyn_cast<SwitchInst>(&I)
 						) {
 							
 							int opidx = 0;
 							for (User::op_iterator oi = I.op_begin(); oi != I.op_end(); ++oi) {
 								User *operand = dyn_cast<User>(I.getOperand(opidx));
-								if (shadowMapA.find(operand) != shadowMapA.end()) {
+								if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
 									CallInst * callMajority = callMajorityBeforeCriticalInst(&I, operand, 
 										M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
 									callMajority->insertBefore(&I);
@@ -262,7 +279,7 @@ namespace {
 						} else if (BranchInst *BR = dyn_cast<BranchInst>(&I)) {
 							if (BR->isConditional()) {
 								User *cond = dyn_cast<User>(BR->getCondition());
-								if (shadowMapA.find(cond) != shadowMapA.end()) {
+								if (cond && shadowMapA.find(cond) != shadowMapA.end()) {
 									CallInst * callMajority = callMajorityBeforeCriticalInst(BR, cond, 
 										M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
 									callMajority->insertBefore(BR);
@@ -271,7 +288,7 @@ namespace {
 							}
 						} else if (SwitchInst *SW = dyn_cast<SwitchInst>(&I)) {
 							User *cond = dyn_cast<User>(SW->getCondition());
-							if (shadowMapA.find(cond) != shadowMapA.end()) {
+							if (cond && shadowMapA.find(cond) != shadowMapA.end()) {
 								CallInst * callMajority = callMajorityBeforeCriticalInst(SW, cond,
 									M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
 								callMajority->insertBefore(SW);
