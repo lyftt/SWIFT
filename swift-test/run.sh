@@ -17,7 +17,7 @@ opt -dot-cfg $fname.opt.bc
 mv cfg.main.dot non-swift-cfg.dot
 dot -Tpdf non-swift-cfg.dot -o $fname-non-swift-cfg.pdf
 
-opt -load $build_dir/swift.so -swift-r < $fname.opt.bc > $fname.swift.bc || { echo "Failed to opt-load"; exit 1; }
+opt -load $build_dir/swift.so -swift-r -mem2reg < $fname.opt.bc > $fname.swift.bc || { echo "Failed to opt-load"; exit 1; }
 size2=$(stat -c %s $fname.swift.bc)
 
 

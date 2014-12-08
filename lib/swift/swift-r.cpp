@@ -104,6 +104,13 @@ namespace {
 			}
 		}
 		
+		static void replacePHINodeIncomingValue(PHINode * phi, int i, User * operand, std::map<User *, AllocaInst *> &shadowMap) {
+			BasicBlock * incoming = phi->getIncomingBlock(i);
+			LoadInst *LdShadow = new LoadInst(shadowMap[operand], "ldShadow");
+			LdShadow->insertBefore(incoming->getTerminator());
+			phi->setIncomingValue(i, LdShadow);
+		}
+
 		static void storeClonedIntoShadow(Instruction * cloned, User * dest, std::map<User *, AllocaInst *> &shadowMap) {
 			StoreInst * StShadow = new StoreInst(cloned, shadowMap[dest]);
 			StShadow->insertAfter(cloned);
@@ -119,7 +126,6 @@ namespace {
 				std::map<User *, AllocaInst *> shadowMapA;
 				std::map<User *, AllocaInst *> shadowMapB;
 				
-				errs() << "get entry block...\n";	
 				// build shadow map for every register
 				bool isEntryBB = true;
 				BasicBlock *EntryBB;
@@ -130,7 +136,6 @@ namespace {
 						if (!dyn_cast<AllocaInst>(&I)
 								&& !dyn_cast<BranchInst>(&I)
 								&& !dyn_cast<CallInst>(&I)
-								&& !dyn_cast<PHINode>(&I)	//TODO fix PHINode!!!
 								&& !dyn_cast<StoreInst>(&I)
 								&& !dyn_cast<TerminatorInst>(&I)
 						) {
@@ -148,19 +153,16 @@ namespace {
 					isEntryBB = false;
 				}
 				
-				errs() << "shadow map built!" << "\n";
 
 				// insert duplication for each instruction
 				for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
 					for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ) {
 						
 						Instruction &I = *II++;
-						//errs() << I << "\n";
 
 						if (!dyn_cast<AllocaInst>(&I)
 								&& !dyn_cast<BranchInst>(&I)
 								&& !dyn_cast<CallInst>(&I)
-								&& !dyn_cast<PHINode>(&I)	//TODO fix PHINode!!!
 								&& !dyn_cast<StoreInst>(&I)
 								&& !dyn_cast<TerminatorInst>(&I)
 						) {
@@ -171,19 +173,28 @@ namespace {
 							clonedB->insertAfter(clonedA);
 							
 							// use shadow variables as operands
-							int opidx = 0;
-							for (User::op_iterator oi = I.op_begin(); oi != I.op_end(); ++oi) {
-								User *operand = dyn_cast<User>(oi);
-								if (shadowMapA.find(operand) != shadowMapA.end()) {
-									replaceOperandWithShadow(clonedA, operand, opidx, shadowMapA);
-									replaceOperandWithShadow(clonedB, operand, opidx, shadowMapB);	
+							if (PHINode * phi = dyn_cast<PHINode>(&I)) {
+								PHINode * phiA = dyn_cast<PHINode>(clonedA);
+								PHINode * phiB = dyn_cast<PHINode>(clonedB);
+								for (int i = 0; i < 2; i++) {
+									User *operand = dyn_cast<User>(phi->getIncomingValue(i));
+									if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
+										replacePHINodeIncomingValue(phiA, i, operand, shadowMapA);
+										replacePHINodeIncomingValue(phiB, i, operand, shadowMapB);
+									}
 								}
-								opidx++;
+							} else {
+								int opidx = 0;
+								for (User::op_iterator oi = I.op_begin(); oi != I.op_end(); ++oi) {
+									User *operand = dyn_cast<User>(oi);
+									if (shadowMapA.find(operand) != shadowMapA.end()) {
+										replaceOperandWithShadow(clonedA, operand, opidx, shadowMapA);
+										replaceOperandWithShadow(clonedB, operand, opidx, shadowMapB);	
+									}
+									opidx++;
+								}
 							}
 							
-							//errs() << " --> " <<  *clonedA << "\n";
-							//errs() << " --> " <<  *clonedB << "\n";
-
 							// store cloned instruction to correct shadow
 							User *dest = dyn_cast<User>(&I);
 							if (shadowMapA.find(dest) != shadowMapA.end()) {
@@ -194,7 +205,6 @@ namespace {
 					}
 				}
 				
-				errs() << "duplications inserted!\n";
 
 				// add check before each critical inst (store, br, call, etc.)
 				
@@ -230,12 +240,7 @@ namespace {
 							}
 						}
 					}
-						
-					//errs() << "\nprint basic block:\n";
-					//errs() << *BB << "\n";
 				}
-				
-				errs() << F << "\n";
 			}
 			return true;
 		}
