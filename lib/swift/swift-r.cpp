@@ -77,14 +77,24 @@ namespace {
 		  BasicBlock *RetCBB = BasicBlock::Create(Context, "return c", MajF);
 			
 			// Create "if (a==b) return a;"
-		  Value *CondInst = new ICmpInst(*cmp1BB, ICmpInst::ICMP_EQ, A, B, "cond");
+		  Value *CondInst;
+			if (type->isIntOrIntVectorTy() || type->getScalarType()->isPointerTy()) {
+				CondInst = new ICmpInst(*cmp1BB, ICmpInst::ICMP_EQ, A, B, "cond");
+			} else {
+				CondInst = new FCmpInst(*cmp1BB, FCmpInst::FCMP_OEQ, A, B, "cond");
+			}
 		  BranchInst::Create(RetABB, cmp2BB, CondInst, cmp1BB);
 			
 		  // Create: ret a
 		  ReturnInst::Create(Context, A, RetABB);
 		
 		  // Create "if (b==c) return b;"
-		  CondInst = new ICmpInst(*cmp2BB, ICmpInst::ICMP_EQ, B, C, "cond");
+		  //CondInst = new ICmpInst(*cmp2BB, ICmpInst::ICMP_EQ, B, C, "cond");
+			if (type->isIntOrIntVectorTy() || type->getScalarType()->isPointerTy()) {
+				CondInst = new ICmpInst(*cmp2BB, ICmpInst::ICMP_EQ, B, C, "cond");
+			} else {
+				CondInst = new FCmpInst(*cmp2BB, FCmpInst::FCMP_OEQ, C, B, "cond");
+			}
 		  BranchInst::Create(RetBBB, RetCBB, CondInst, cmp2BB);
 			
 		  // Create: ret b
