@@ -126,20 +126,38 @@ namespace {
 			for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
 				for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ) {
 					Instruction &I = *II++;
-					if (dyn_cast<StoreInst>(&I)
-							|| dyn_cast<CallInst>(&I)
-					) {
-												
+					if (StoreInst *ST = dyn_cast<StoreInst>(&I)) {
+						Value *v = ST->getValueOperand();
+						if (User *operand = dyn_cast<User>(v)) {
+							if (!dyn_cast<AllocaInst>(operand) && shadowMap.find(operand) != shadowMap.end()) {
+								LoadInst *shadow = new LoadInst(shadowMap[operand], "ldShadow");
+								shadow->insertBefore(&I);
+								errs() << "insert icmp of " << *operand << " and " << *shadow << "\n";
+								ICmpInst *icmp = new ICmpInst(ICmpInst::ICMP_NE, operand, shadow);
+								icmp->insertBefore(&I);
+								
+								BasicBlock *RestBB = SplitBlock(BB, &I, this);										
+								BranchInst::Create(FaultDetected, RestBB, icmp, BB->getTerminator());									
+								BB->getInstList().pop_back();
+								
+								BB = RestBB;
+								II = BB->begin();
+								II++;
+								IE = BB->end();
+							}
+						}
+					} else if (dyn_cast<CallInst>(&I)) {
 						// for store/call inst, check operands
 						for (User::op_iterator oi = I.op_begin(); oi!= I.op_end(); ++oi) {
 							if (User *operand = dyn_cast<User>(oi)) {
 								if (!dyn_cast<AllocaInst>(operand) && shadowMap.find(operand) != shadowMap.end()) {
 									LoadInst *shadow = new LoadInst(shadowMap[operand], "ldShadow");
 									shadow->insertBefore(&I);
+									errs() << "insert icmp of " << *operand << " and " << *shadow << "\n";
 									ICmpInst *icmp = new ICmpInst(ICmpInst::ICMP_NE, operand, shadow);
 									icmp->insertBefore(&I);
 									
-									BasicBlock *RestBB = SplitBlock(BB, &I, this);
+									BasicBlock *RestBB = SplitBlock(BB, &I, this);										
 									BranchInst::Create(FaultDetected, RestBB, icmp, BB->getTerminator());
 									BB->getInstList().pop_back();
 									
@@ -159,6 +177,7 @@ namespace {
 								if (shadowMap.find(cond) != shadowMap.end()) {
 									LoadInst *shadow = new LoadInst(shadowMap[cond], "ldShadow");
 									shadow->insertBefore(&I);
+									errs() << "insert icmp of " << *cond << " and " << *shadow << "\n";
 									ICmpInst *icmp = new ICmpInst(ICmpInst::ICMP_NE, cond, shadow);
 									icmp->insertBefore(&I);
 									
