@@ -1,10 +1,12 @@
 #include <stdio.h>
 
 #define N 10
+//#define LOOP 100000
 
 int main() {
 	int f[N];
-	int i;
+	int i, l;
+//	for (l = 0; l < LOOP; l++) {
 	for (i = 0; i < N; i++ ) {
 		if (i <= 1) {
 			f[i] = i;
@@ -13,5 +15,6 @@ int main() {
 		}
 	}
 	printf("%d\n", f[N-1]);
+//	}
 	return 0;
 }

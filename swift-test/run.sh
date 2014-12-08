@@ -1,6 +1,6 @@
 #!/bin/bash
-fname=wc
-iname=cccp.c
+fname=compress
+iname=compress.in.Z
 oname=output
 build_dir=../Release+Asserts/lib
 
@@ -17,7 +17,7 @@ opt -dot-cfg $fname.opt.bc
 mv cfg.main.dot non-swift-cfg.dot
 dot -Tpdf non-swift-cfg.dot -o $fname-non-swift-cfg.pdf
 
-opt -load $build_dir/swift.so -swift-r -mem2reg < $fname.opt.bc > $fname.swift.bc || { echo "Failed to opt-load"; exit 1; }
+opt -load $build_dir/swift.so -swift-r -mem2reg -fault < $fname.opt.bc > $fname.swift.bc || { echo "Failed to opt-load"; exit 1; }
 size2=$(stat -c %s $fname.swift.bc)
 
 
@@ -37,8 +37,10 @@ t4=$(date +%s%N)
 opt -dot-cfg $fname.swift.bc
 mv cfg.main.dot swift-cfg.dot
 dot -Tpdf swift-cfg.dot -o $fname-swift-cfg.pdf
-mv cfg.majority.dot majority.dot
-dot -Tpdf majority.dot -o $fname-majority-cfg.pdf
+mv cfg.majority0.dot majority0.dot
+dot -Tpdf majority0.dot -o $fname-majority0-cfg.pdf
+mv cfg.majority1.dot majority1.dot
+dot -Tpdf majority1.dot -o $fname-majority1-cfg.pdf
 
 rm *.bc *.s *.dot
 

@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
 
 /* LLVM Header File
 #include "llvm/Support/DataTypes.h"
@@ -29,6 +30,7 @@
 
 /* Header file global to this project */
 #include <map>
+#include <set>
 
 using namespace llvm;
 
@@ -46,15 +48,15 @@ namespace {
 			
 		}
 		
-		static Function *CreateMajorityFunction(Module *M, LLVMContext &Context) {
-		  // Create the majority function and insert it into module M.
-		  Function *MajF = cast<Function>(M->getOrInsertFunction("majority",
-		    Type::getInt32Ty(Context),
-			  Type::getInt32Ty(Context),
-		    Type::getInt32Ty(Context),
-			  Type::getInt32Ty(Context),
-				(Type *)0));
-
+	
+		static Function *CreateMajorityFunction(Module *M, LLVMContext &Context, Type *type, int cnt) {
+			// Create the majority function and insert it into module M.
+			std::stringstream sstm;
+			sstm << "majority" << cnt;
+			std::string funcName = sstm.str();
+		  Function *MajF = cast<Function>(M->getOrInsertFunction(funcName,
+				type, type, type, type, (Type *)0));
+			
 		  // Get pointers to the integer argument
 		  Function::arg_iterator arg = MajF->arg_begin();
 		  Value *A = arg++;
@@ -115,14 +117,45 @@ namespace {
 			StoreInst * StShadow = new StoreInst(cloned, shadowMap[dest]);
 			StShadow->insertAfter(cloned);
 		}
+		
+		static CallInst * callMajorityBeforeCriticalInst(Instruction * I, User * operand, 
+				Module &M, std::map<Type *, Constant *> &majorityFuncMap, std::set<Constant *> &majorityFuncSet,
+				std::map<User *, AllocaInst *> &shadowMapA, std::map<User *, AllocaInst *> &shadowMapB
+		) {
+			
+			//errs() << "insert majority() for " << *operand << "\n";
+		
+			Type * type = operand->getType();
+			if (majorityFuncMap.find(type) == majorityFuncMap.end()) {
+				majorityFuncMap[type] = CreateMajorityFunction(&M, M.getContext(), type, majorityFuncMap.size());
+				majorityFuncSet.insert(majorityFuncMap[type]);
+			}
+			
+			LoadInst *shadowA = new LoadInst(shadowMapA[operand], "ldShadow");
+			shadowA->insertBefore(I);
+			LoadInst *shadowB = new LoadInst(shadowMapB[operand], "ldShadow");
+			shadowB->insertBefore(I);
+			
+			std::vector<Value *> Args(3);
+			Args[0] = operand;
+			Args[1] = shadowA;
+			Args[2] = shadowB;
+			
+			CallInst *callMajority = CallInst::Create(majorityFuncMap[type], Args, "call");
+			//errs() << *callMajority << "\n";
+			return callMajority;
+		}
 
 		virtual bool runOnModule(Module &M) {
 			
-			Constant *Majority = CreateMajorityFunction(&M, M.getContext());
-			
+			std::map<Type *, Constant *> majorityFuncMap;
+			std::set<Constant *> majorityFuncSet;
+
 			for (Module::iterator FB = M.begin(), FE = M.end(); FB != FE;) {
 				Function &F = *FB++;
 				
+				if (majorityFuncSet.find(&F) != majorityFuncSet.end()) continue;
+
 				std::map<User *, AllocaInst *> shadowMapA;
 				std::map<User *, AllocaInst *> shadowMapB;
 				
@@ -213,30 +246,36 @@ namespace {
 						Instruction &I = *II++;
 						if (dyn_cast<StoreInst>(&I)
 								|| dyn_cast<CallInst>(&I)
-								|| dyn_cast<BranchInst>(&I)
-								|| dyn_cast<SwitchInst>(&I)
+								//|| dyn_cast<SwitchInst>(&I)
 						) {
 							
 							int opidx = 0;
 							for (User::op_iterator oi = I.op_begin(); oi != I.op_end(); ++oi) {
 								User *operand = dyn_cast<User>(I.getOperand(opidx));
-								if (operand && !dyn_cast<AllocaInst>(operand) && shadowMapA.find(operand) != shadowMapA.end()) {
-									if (operand->getType() == Type::getInt32Ty(F.getContext())) {
-										LoadInst *shadowA = new LoadInst(shadowMapA[operand], "ldShadow");
-										shadowA->insertBefore(&I);
-										LoadInst *shadowB = new LoadInst(shadowMapB[operand], "ldShadow");
-										shadowB->insertBefore(&I);
-																
-										std::vector<Value *> Args(3);
-										Args[0] = operand;
-										Args[1] = shadowA;
-										Args[2] = shadowB;
-										
-										CallInst *callMajority = CallInst::Create(Majority, Args, "call");
-										callMajority->insertBefore(&I);
-										I.setOperand(opidx, callMajority);
-									}
+								if (shadowMapA.find(operand) != shadowMapA.end()) {
+									CallInst * callMajority = callMajorityBeforeCriticalInst(&I, operand, 
+										M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
+									callMajority->insertBefore(&I);
+									I.setOperand(opidx, callMajority);
 								}
+							}
+						} else if (BranchInst *BR = dyn_cast<BranchInst>(&I)) {
+							if (BR->isConditional()) {
+								User *cond = dyn_cast<User>(BR->getCondition());
+								if (shadowMapA.find(cond) != shadowMapA.end()) {
+									CallInst * callMajority = callMajorityBeforeCriticalInst(BR, cond, 
+										M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
+									callMajority->insertBefore(BR);
+									BR->setCondition(callMajority);
+								}
+							}
+						} else if (SwitchInst *SW = dyn_cast<SwitchInst>(&I)) {
+							User *cond = dyn_cast<User>(SW->getCondition());
+							if (shadowMapA.find(cond) != shadowMapA.end()) {
+								CallInst * callMajority = callMajorityBeforeCriticalInst(SW, cond,
+									M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
+								callMajority->insertBefore(SW);
+								SW->setCondition(callMajority);
 							}
 						}
 					}
