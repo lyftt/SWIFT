@@ -272,9 +272,25 @@ namespace {
 								loadInstMapA[LD]->setOperand(opidx, callMajority);
 								loadInstMapB[LD]->setOperand(opidx, callMajority);
 							}
-						} else if (dyn_cast<StoreInst>(&I)
-								|| dyn_cast<CallInst>(&I)
-						) {
+						} else if (StoreInst * ST = dyn_cast<StoreInst>(&I)) {
+						
+							User *operand = dyn_cast<User>(ST->getValueOperand());
+							if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
+								CallInst * callMajority = callMajorityBeforeCriticalInst(ST, operand, 
+									M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
+								callMajority->insertBefore(ST);
+								ST->setOperand(0, callMajority);
+							}
+							
+							operand = dyn_cast<User>(ST->getPointerOperand());
+							if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
+								CallInst * callMajority = callMajorityBeforeCriticalInst(ST, operand, 
+									M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
+								callMajority->insertBefore(ST);
+								ST->setOperand(ST->getPointerOperandIndex(), callMajority);
+							}
+
+						} else if (dyn_cast<CallInst>(&I)) {
 							
 							int opidx = 0;
 							for (User::op_iterator oi = I.op_begin(); oi != I.op_end(); ++oi) {
