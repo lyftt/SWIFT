@@ -170,7 +170,8 @@ namespace {
 				std::map<User *, AllocaInst *> shadowMapB;
 				std::map<LoadInst *, Instruction *> loadInstMapA;
 				std::map<LoadInst *, Instruction *> loadInstMapB;
-				
+				std::set<CallInst *> insertedCallInsts;
+
 				// build shadow map for every register
 				bool isEntryBB = true;
 				BasicBlock *EntryBB;
@@ -219,13 +220,24 @@ namespace {
 							
 							// use shadow variables as operands
 							if (PHINode * phi = dyn_cast<PHINode>(&I)) {
+								// for phi node, call majority() in incoming block and use it as incoming value!
 								PHINode * phiA = dyn_cast<PHINode>(clonedA);
 								PHINode * phiB = dyn_cast<PHINode>(clonedB);
 								for (int i = 0; i < 2; i++) {
-									User *operand = dyn_cast<User>(phi->getIncomingValue(i));
-									if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
-										replacePHINodeIncomingValue(phiA, i, operand, shadowMapA);
-										replacePHINodeIncomingValue(phiB, i, operand, shadowMapB);
+									User *incomingValue = dyn_cast<User>(phi->getIncomingValue(i));
+									if (incomingValue && shadowMapA.find(incomingValue) != shadowMapA.end()) {
+										BasicBlock * incomingBlock = phi->getIncomingBlock(i);
+										
+										CallInst * callMajority = callMajorityBeforeCriticalInst(
+											incomingBlock->getTerminator(), incomingValue,
+											M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
+										callMajority->insertBefore(incomingBlock->getTerminator());
+										
+										phi->setIncomingValue(i, callMajority);
+										phiA->setIncomingValue(i, callMajority);
+										phiB->setIncomingValue(i, callMajority);
+										
+										insertedCallInsts.insert(callMajority);
 									}
 								}
 							} else {
@@ -294,15 +306,17 @@ namespace {
 							}
 
 						} else if (CallInst * CA = dyn_cast<CallInst>(&I)) {
-							
-							int numArg = CA->getNumArgOperands();
-							for (int opidx = 0; opidx < numArg; opidx++) {
-								User *operand = dyn_cast<User>(CA->getArgOperand(opidx));
-								if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
-									CallInst * callMajority = callMajorityBeforeCriticalInst(&I, operand, 
-										M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
-									callMajority->insertBefore(&I);
-									I.setOperand(opidx, callMajority);
+							// make sure it's not the callMajority that we inserted
+							if (insertedCallInsts.find(CA) == insertedCallInsts.end()) {
+								int numArg = CA->getNumArgOperands();
+								for (int opidx = 0; opidx < numArg; opidx++) {
+									User *operand = dyn_cast<User>(CA->getArgOperand(opidx));
+									if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
+										CallInst * callMajority = callMajorityBeforeCriticalInst(&I, operand, 
+											M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
+										callMajority->insertBefore(&I);
+										I.setOperand(opidx, callMajority);
+									}
 								}
 							}
 
