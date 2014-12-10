@@ -261,7 +261,9 @@ namespace {
 				for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; BB++) {
 					for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ) {
 						Instruction &I = *II++;
+						
 						if (LoadInst * LD = dyn_cast<LoadInst>(&I)) {
+							
 							User *operand = dyn_cast<User>(LD->getPointerOperand());
 							if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
 								CallInst * callMajority = callMajorityBeforeCriticalInst(LD, operand,
@@ -272,6 +274,7 @@ namespace {
 								loadInstMapA[LD]->setOperand(opidx, callMajority);
 								loadInstMapB[LD]->setOperand(opidx, callMajority);
 							}
+							
 						} else if (StoreInst * ST = dyn_cast<StoreInst>(&I)) {
 						
 							User *operand = dyn_cast<User>(ST->getValueOperand());
@@ -290,11 +293,11 @@ namespace {
 								ST->setOperand(ST->getPointerOperandIndex(), callMajority);
 							}
 
-						} else if (dyn_cast<CallInst>(&I)) {
+						} else if (CallInst * CA = dyn_cast<CallInst>(&I)) {
 							
-							int opidx = 0;
-							for (User::op_iterator oi = I.op_begin(); oi != I.op_end(); ++oi) {
-								User *operand = dyn_cast<User>(I.getOperand(opidx));
+							int numArg = CA->getNumArgOperands();
+							for (int opidx = 0; opidx < numArg; opidx++) {
+								User *operand = dyn_cast<User>(CA->getArgOperand(opidx));
 								if (operand && shadowMapA.find(operand) != shadowMapA.end()) {
 									CallInst * callMajority = callMajorityBeforeCriticalInst(&I, operand, 
 										M, majorityFuncMap, majorityFuncSet, shadowMapA, shadowMapB);
@@ -302,7 +305,9 @@ namespace {
 									I.setOperand(opidx, callMajority);
 								}
 							}
+
 						} else if (BranchInst *BR = dyn_cast<BranchInst>(&I)) {
+							
 							if (BR->isConditional()) {
 								User *cond = dyn_cast<User>(BR->getCondition());
 								if (cond && shadowMapA.find(cond) != shadowMapA.end()) {
@@ -312,7 +317,9 @@ namespace {
 									BR->setCondition(callMajority);
 								}
 							}
+							
 						} else if (SwitchInst *SW = dyn_cast<SwitchInst>(&I)) {
+							
 							User *cond = dyn_cast<User>(SW->getCondition());
 							if (cond && shadowMapA.find(cond) != shadowMapA.end()) {
 								CallInst * callMajority = callMajorityBeforeCriticalInst(SW, cond,
@@ -320,6 +327,7 @@ namespace {
 								callMajority->insertBefore(SW);
 								SW->setCondition(callMajority);
 							}
+							
 						}
 					}
 				}
